@@ -78,14 +78,14 @@ static double** classic_gram_schmidt(double** in, double** H)
 
 double Function(double x1, double x2, double x3)
 {
-	return (3 / 2.) * x1*x1 + (3 / 2.) * x2*x2 + (3 / 2.) * x3*x3 - 2*x1*x2 - 2*x2*x3 - x1 - 2 * x2 - 3 * x3;
+	return x1*x1 + x2*x2 + x3*x3 - x1*x2 - x2*x3 - 3 * x1 - 2 * x2 - x3;
 }
 
 void Gradient(double x[], double y[])
 {
-	y[0] = 3 * x[0] - 2* x[1] - 1;
-	y[1] = -2 * x[0] + 3 * x[1] - 2 * x[2] - 2;
-	y[2] = - 2 * x[1] + 3 * x[2] - 3;
+	y[0] = 2 * x[0] - x[1] - 3;
+	y[1] = -x[0] + 2 * x[1] - x[2] - 2;
+	y[2] = -x[1] + 2 * x[2] - 1;
 }
 
 double** Hessian(double x[] = nullptr)
@@ -94,16 +94,43 @@ double** Hessian(double x[] = nullptr)
 	for (int i = 0; i < 3; i++)
 		H[i] = new double[3];
 
+	H[0][0] = 2;
+	H[0][1] = H[1][0] = -1;
+	H[0][2] = H[2][0] = 0;
+	H[1][1] = 2;
+	H[1][2] = H[2][1] = -1;
+	H[2][2] = 2;
+	return H;
+}
+
+
+double g(double x1, double x2, double x3)
+{
+	return (3 / 2.) * x1*x1 + (3 / 2.) * x2*x2 + (3 / 2.) * x3 * x3 - 2 * x1 * x2 - 2 * x2 * x3 - x1 - 2 * x2 - 3 * x3 + (x2 - 14)*(x2 - 14)*(x2 - 14)*(x2 - 14);
+}
+
+void gradG(double x[], double y[])
+{
+	y[0] = 3 * x[0] - 2 * x[1] - 1;
+	y[1] = -2 * x[0] + 3 * x[1] - 2 * x[2] - 2 + 4 * (x[1] - 14)*(x[1] - 14)*(x[1] - 14);
+	y[2] = -2 * x[1] + 3 * x[2] - 3;
+}
+
+double** hessianG(double x[])
+{
+	double **H = new double*[3];
+	for (int i = 0; i < 3; i++)
+		H[i] = new double[3];
 	H[0][0] = 3;
 	H[0][1] = H[1][0] = -2;
 	H[0][2] = H[2][0] = 0;
-	H[1][1] = 3;
+	H[1][1] = 3 + 12 * (x[1] - 14) * (x[1] - 14);
 	H[1][2] = H[2][1] = -2;
 	H[2][2] = 3;
 	return H;
 }
 
-void Gradient2(double x[], double y[], int recalculate)
+void Gradient2(double x[], double y[], bool isModification, int recalculate)
 {
 	double **H, **invH, grad[3], det = 0, **tmp;
 	H = new double*[3];
@@ -117,7 +144,12 @@ void Gradient2(double x[], double y[], int recalculate)
 
 	if (recalculate)
 	{
-		tmp = Hessian();
+		if (!isModification) {
+			tmp = Hessian();
+		}
+		else {
+			tmp = hessianG(x);
+		}
 		for (int i = 0; i < 3; i++)
 		{
 			for (int j = 0; j < 3; j++)
@@ -125,17 +157,19 @@ void Gradient2(double x[], double y[], int recalculate)
 		}
 		inverse(H, invH, 3);
 	}
-
-	Gradient(x, grad);
+	if (isModification == false) {
+		Gradient(x, grad);
+	}
+	else {
+		gradG(x, grad);
+	}
 	y[0] = (invH[0][0] * grad[0] + invH[0][1] * grad[1] + invH[0][2] * grad[2]);
 	y[1] = (invH[1][0] * grad[0] + invH[1][1] * grad[1] + invH[1][2] * grad[2]);
 	y[2] = (invH[2][0] * grad[0] + invH[2][1] * grad[1] + invH[2][2] * grad[2]);
 }
 
-
 double Step_Newton(double x[], double y[], double *f, double norm)
 {
-	/* Pshenichniy power */
 	double newtonStep = 1;
 	double x_k_1[3];
 	x_k_1[0] = x[0] - newtonStep * y[0];
@@ -166,6 +200,38 @@ double Step_Newton(double x[], double y[], double *f, double norm)
 	*f = Function(x[0], x[1], x[2]);
 	return newtonStep;
 }
+double Step_Newton_Modification(double x[], double y[], double *f, double norm)
+{
+	double newtonStep = 1;
+	double x_k_1[3];
+	x_k_1[0] = x[0] - newtonStep * y[0];
+	x_k_1[1] = x[1] - newtonStep * y[1];
+	x_k_1[2] = x[2] - newtonStep * y[2];
+	double fk1 = g(x_k_1[0], x_k_1[1], x_k_1[2]);
+	double fk2 = g(x[0], x[1], x[2]);
+	double mult;
+	double grad[3];
+	gradG(x, grad);
+	mult = -0.5 * (grad[0] * y[0] + grad[1] * y[1] + grad[2] * y[2]);
+	while ((fk1 - fk2) > (mult * newtonStep * EPSILON))
+	{
+		newtonStep /= 2;
+		x_k_1[0] = x[0] - newtonStep * y[0];
+		x_k_1[1] = x[1] - newtonStep * y[1];
+		x_k_1[2] = x[2] - newtonStep * y[2];
+		fk1 = g(x_k_1[0], x_k_1[1], x_k_1[2]);
+		fk2 = g(x[0], x[1], x[2]);
+		gradG(x, grad);
+		mult = -0.5 * (grad[0] * y[0] + grad[1] * y[1] + grad[2] * y[2]);
+	}
+
+	x[0] -= newtonStep * y[0];
+	x[1] -= newtonStep * y[1];
+	x[2] -= newtonStep * y[2];
+
+	*f = g(x[0], x[1], x[2]);
+	return newtonStep;
+}
 
 double* vector_dot_matrix(double* vec, double** Matrix)
 {
@@ -183,7 +249,7 @@ int    fp_loc_iter = 0;
 double* S_prev = new double[3];
 double stepFR = 0;
 static double **hess = nullptr;
-static bool autoGenerate = true;
+static bool autoGenerate = false;
 double Step_FletcherReeves(double x[], double y[], double *f, double norm)
 {
 	double* S_cur = new double[3];
@@ -195,15 +261,13 @@ double Step_FletcherReeves(double x[], double y[], double *f, double norm)
 
 	if (!hess) {
 		hess = Hessian();
-		print(hess);
 	}
 	double** A = Hessian();
 	A[0][0] = 1;
-	A[0][1] = 0;
-	A[1][0] = 0;
-	A[0][2] = A[2][0] = 0;
+	A[0][1] = A[1][0] = 4;
+	A[0][2] = A[2][0] = 2;
 	A[1][1] = 1;
-	A[1][2] = A[2][1] = 0;
+	A[1][2] = A[2][1] = 6;
 	A[2][2] = 1;
 
 	double **ss = classic_gram_schmidt(A, hessian);
@@ -269,37 +333,6 @@ double Step_FletcherReeves(double x[], double y[], double *f, double norm)
 	*f = Function(x[0], x[1], x[2]);
 	fp_loc_iter++;
 	return stepFR;
-}
-
-
-//////////////////////////////////////////////////////////////
-// STEP FLETCHER-REEVES MODIFICATIONS
-//////////////////////////////////////////////////////////////
-
-double g(double x1, double x2, double x3)
-{
-	return (3 / 2.) * x1*x1 + (3 / 2.) * x2*x2 + (3 / 2.) * x3 * x3 - 2*x1 * x2 - 2*x2 * x3 - x1 - 2 * x2 - 3*x3 + (x2 - 14)*(x2 - 14)*(x2 - 14)*(x2 - 14);
-}
-
-void gradG(double x[], double y[])
-{
-	y[0] = 3 * x[0] -2* x[1] - 1;
-	y[1] = -2*x[0] + 3 * x[1] - 2*x[2] - 2 + 4 * (x[1] - 14)*(x[1] - 14)*(x[1] - 14);
-	y[2] = -2*x[1] + 3 * x[2] - 3;
-}
-
-double** hessianG(double x[])
-{
-	double **H = new double*[3];
-	for (int i = 0; i < 3; i++)
-		H[i] = new double[3];
-	H[0][0] = 3;
-	H[0][1] = H[1][0] = -2;
-	H[0][2] = H[2][0] = 0;
-	H[1][1] = 3 + 12 * (x[1] - 14) * (x[1] - 14);
-	H[1][2] = H[2][1] = -2;
-	H[2][2] = 3;
-	return H;
 }
 
 
@@ -395,17 +428,19 @@ double Step_ModificationFletcherReeves(double x[], double y[], double *f, double
 	return stepMFR;
 }
 
-int Test(double(*Step)(double[], double[], double *, double), int i)
+int Test(double(*Step)(double[], double[], double *, double), bool isModification, bool isNewton)
 {
 	int step = 0;
-	double x[3] = { 10, 2, 3 }, x_prev[3], y[3], f = Function(x[0], x[1], x[2]), norm;
+	double x[3] = { 1, 2, 3 }, x_prev[3], y[3], f = Function(x[0], x[1], x[2]), norm;
 	int iters = 0;
 	static double solution[3];
-
+	if (isModification) {
+		f = g(x[0], x[1], x[2]);
+	}
 	fp_loc_iter = 0;
 	do
 	{
-		if (i != 6)
+		if (!isModification)
 			Gradient(x, y);
 		else
 			gradG(x, y);
@@ -415,8 +450,14 @@ int Test(double(*Step)(double[], double[], double *, double), int i)
 			"\n f=%07.5lf \n\n", x[0], x[1], x[2], y[0], y[1], y[2], norm, f);
 		if (norm <= EPSILON)
 			break;
-		if (i == 3)
-			Gradient2(x, y, 1);
+
+		if (isNewton) {
+			if (isModification)
+				Gradient2(x, y, true, 1);
+			else
+				Gradient2(x, y, false, 1);
+		}
+
 
 		memcpy(x_prev, x, 2 * sizeof(double));
 		printf(" step=%6.5lf\n", Step(x, y, &f, norm));
@@ -424,8 +465,7 @@ int Test(double(*Step)(double[], double[], double *, double), int i)
 		step++;
 	} while (norm > EPSILON);
 
-	if (i == 0)
-		memcpy(solution, x, 2 * sizeof(double));
+
 	printf("\nDone in %d steps\n", step);
 
 	return step;
@@ -434,16 +474,21 @@ int Test(double(*Step)(double[], double[], double *, double), int i)
 int main(void)
 {
 	setlocale(LC_ALL, "Russian");
+
 	std::cout << "1 - Метод Флетчера-Ривса" << std::endl;
-	Test(Step_FletcherReeves, 5);
+	Test(Step_FletcherReeves, false, false);
 	std::cout << std::endl;
 
 	std::cout << "2 - Модифицированный метод Флетчера-Ривса" << std::endl;
-	Test(Step_ModificationFletcherReeves, 6);
+	Test(Step_ModificationFletcherReeves, true, false);
 	std::cout << std::endl;
 
 	std::cout << "3 - Метод Ньютона" << std::endl;
-	Test(Step_Newton, 3);
+	Test(Step_Newton, false, true);
+	std::cout << std::endl;
+
+	std::cout << "4 - Метод Ньютона для модификации" << std::endl;
+	Test(Step_Newton_Modification, true, true);
 	std::cout << std::endl;
 
 	system("pause");
